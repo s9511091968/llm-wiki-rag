@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG 檢索增強生成 — 從零開始的教學簡報</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent-secondary: #818cf8;
+            --success: #34d399;
+            --warning: #fbbf24;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        /* 進度條 */
+        .progress-bar {
+            height: 5px;
+            background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        /* 簡報主容器 */
+        .slides-container {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .slide {
+            display: none;
+            width: 100%;
+            max-width: 960px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 3rem;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            animation: fadeIn 0.4s ease;
+        }
+        .slide.active { display: block; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* 文字排版 */
+        .badge {
+            display: inline-block;
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent);
+            padding: 0.3rem 0.8rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        h1 { font-size: 2.6rem; line-height: 1.2; margin-bottom: 1rem; background: linear-gradient(90deg, #fff, var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        h2 { font-size: 1.9rem; margin-bottom: 1.5rem; color: var(--accent); border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem; }
+        p { font-size: 1.15rem; line-height: 1.7; color: var(--text-muted); margin-bottom: 1rem; }
+        ul { list-style: none; margin-top: 1rem; }
+        li { font-size: 1.1rem; line-height: 1.6; margin-bottom: 0.9rem; padding-left: 1.6rem; position: relative; }
+        li::before { content: "▹"; position: absolute; left: 0; color: var(--accent); font-weight: bold; }
+        strong { color: #fff; }
+        /* 網格與卡片 */
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; margin-top: 1.5rem; }
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; margin-top: 1.5rem; }
+        .box { background: rgba(15, 23, 42, 0.6); padding: 1.4rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); }
+        .box h3 { color: var(--success); margin-bottom: 0.6rem; font-size: 1.2rem; }
+        .flow-step { text-align: center; padding: 1.2rem; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--accent); border-radius: 12px; }
+        .wiki-ref { margin-top: 2rem; font-size: 0.85rem; color: #64748b; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 0.8rem; }
+        /* 底部導覽列 */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2.5rem;
+            background: rgba(15, 23, 42, 0.9);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        button {
+            background: var(--accent);
+            color: #0f172a;
+            border: none;
+            padding: 0.6rem 1.4rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:disabled { opacity: 0.3; cursor: not-allowed; }
+        button:hover:not(:disabled) { opacity: 0.85; }
+        .page-num { color: var(--text-muted); font-size: 0.95rem; }
+        @media (max-width: 768px) {
+            .grid-3, .grid-2 { grid-template-columns: 1fr; }
+            .slide { padding: 1.8rem; max-height: 82vh; overflow-y: auto; }
+            h1 { font-size: 1.9rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="progress-bar" id="progress"></div>
+    <div class="slides-container">
+        <!-- Slide 1: 封面 -->
+        <div class="slide active">
+            <span class="badge">LLM Wiki 知識庫驅動教學</span>
+            <h1>什麼是 RAG？<br>檢索增強生成完全指南</h1>
+            <p>Retrieval-Augmented Generation：讓大型語言模型學會「先查資料、再回答問題」的核心技術。</p>
+            <div class="grid-3">
+                <div class="box"><h3>01. 解決痛點</h3><p style="font-size:0.95rem;">消除 AI 幻覺與知識過時問題</p></div>
+                <div class="box"><h3>02. 核心架構</h3><p style="font-size:0.95rem;">索引切塊、向量檢索與提示增強</p></div>
+                <div class="box"><h3>03. 品質評估</h3><p style="font-size:0.95rem;">透過 RAG 三角指標驗證回答準確度</p></div>
+            </div>
+            <div class="wiki-ref">知識來源：LLM Wiki — RAG 檢索增強生成知識庫 (Pages 1–5)</div>
+        </div>
+
+        <!-- Slide 2: 為什麼需要 RAG -->
+        <div class="slide">
+            <span class="badge">概念篇 · 痛點解析</span>
+            <h2>為什麼大型語言模型需要 RAG？</h2>
+            <p>如果把傳統 LLM 比喻成「閉卷考試的學生」，它只能憑藉訓練時的記憶作答，容易遇到三大瓶頸：</p>
+            <ul>
+                <li><strong>知識截止限制</strong>：模型不知道訓練日期之後發生的最新新聞或法規變動。</li>
+                <li><strong>領域知識盲區</strong>：模型沒有讀過你公司的內部規章、個人筆記或專屬資料庫。</li>
+                <li><strong>AI 幻覺（Hallucination）</strong>：遇到不會的問題時，模型容易「一本正經地胡說八道」。</li>
+            </ul>
+            <div class="box" style="margin-top:1.2rem; border-left: 4px solid var(--accent);">
+                <strong>💡 RAG 的核心精神：</strong>把「閉卷考試」變成「開卷考試」，在回答前先去外部知識庫翻找正確段落！
+            </div>
+            <div class="wiki-ref">對應 Wiki 條目：Page 1 — RAG 的核心概念與痛點解決</div>
+        </div>
+
+        <!-- Slide 3: RAG 運作三部曲 -->
+        <div class="slide">
+            <span class="badge">架構篇 · 運作流程</span>
+            <h2>RAG 系統運作的三個核心階段</h2>
+            <p>完整的 RAG 系統分為「離線準備」與「線上問答」兩大階段，包含三個關鍵步驟：</p>
+            <div class="grid-3">
+                <div class="flow-step">
+                    <div style="font-size:1.5rem; margin-bottom:0.5rem;">📚 1. 索引 (Indexing)</div>
+                    <p style="font-size:0.95rem; color:#e2e8f0;">將文件切塊並轉成向量，存入向量資料庫（離線預處理）。</p>
+                </div>
+                <div class="flow-step">
+                    <div style="font-size:1.5rem; margin-bottom:0.5rem;">🔍 2. 檢索 (Retrieval)</div>
+                    <p style="font-size:0.95rem; color:#e2e8f0;">將問題轉成向量，從資料庫比對並撈出最相關的 Top-K 片段。</p>
+                </div>
+                <div class="flow-step">
+                    <div style="font-size:1.5rem; margin-bottom:0.5rem;">✍️ 3. 生成 (Generation)</div>
+                    <p style="font-size:0.95rem; color:#e2e8f0;">將問題 + 參考資料打包成 Prompt，交給 LLM 彙整出有憑有據的答案。</p>
+                </div>
+            </div>
+            <div class="wiki-ref">對應 Wiki 條目：Page 2 & Page 3 — 索引與檢索階段</div>
+        </div>
+
+        <!-- Slide 4: 離線索引細節 -->
+        <div class="slide">
+            <span class="badge">技術細節 · 離線處理</span>
+            <h2>Step 1：文件切塊 (Chunking) 與向量化</h2>
+            <p>電腦無法直接理解整本 PDF 的語意，因此必須將資料拆解並數位化：</p>
+            <div class="grid-2">
+                <div class="box">
+                    <h3>✂️ 為什麼要切塊 (Chunking)？</h3>
+                    <p style="font-size:0.98rem;">長文章會稀釋重點。將文章切成固定大小（如 500 字）並保留 <strong>Overlap（重疊區間）</strong>，避免一句話被從中間切斷而失去上下文。</p>
+                </div>
+                <div class="box">
+                    <h3>🔢 什麼是向量嵌入 (Embedding)？</h3>
+                    <p style="font-size:0.98rem;">透過 Embedding 模型將文字轉換成一串數字座標。語意相近的句子（例如「貓」與「小貓」），在空間中的距離會非常接近。</p>
+                </div>
+            </div>
+            <div class="wiki-ref">對應 Wiki 條目：Page 2 — 離線索引階段（Indexing）</div>
+        </div>
+
+        <!-- Slide 5: 線上檢索與重排序 -->
+        <div class="slide">
+            <span class="badge">技術細節 · 線上搜尋</span>
+            <h2>Step 2：如何精準撈出對的資料？</h2>
+            <ul>
+                <li><strong>語意檢索（Vector Search）</strong>：計算問題向量與資料庫向量的餘弦相似度，即使字面不同（如「如何退貨」與「退款流程」），也能靠語意找到。</li>
+                <li><strong>混合檢索（Hybrid Search）</strong>：結合「傳統關鍵字搜尋（BM25）」與「向量語意搜尋」，兼顧專有名詞精準比對與語意理解。</li>
+                <li><strong>重排序（Reranking）</strong>：先寬鬆撈出前 20 筆資料，再用更精細的 Reranker 模型重新打分排序，只把最準的前 3 筆（Top-3）交給 LLM。</li>
+            </ul>
+            <div class="wiki-ref">對應 Wiki 條目：Page 3 — 線上檢索階段（Retrieval）</div>
+        </div>
+
+        <!-- Slide 6: 增強生成與防幻覺 -->
+        <div class="slide">
+            <span class="badge">技術細節 · 提示工程</span>
+            <h2>Step 3：增強生成與防幻覺護欄</h2>
+            <p>撈出資料後，系統會在幕後組裝成類似下方的 Prompt 送給 LLM：</p>
+            <div class="box" style="font-family: monospace; font-size: 0.95rem; color: #e2e8f0; line-height: 1.6;">
+                【系統指令】請<strong>嚴格根據</strong>下方提供的參考資料回答問題。若資料中沒有答案，請直接回答「現有資料無法回答」，<strong>嚴禁自行推測</strong>，並在句尾標註來源編號。<br><br>
+                【參考資料】<br>
+                [1] 退貨須於收到商品後 7 日內提出申請...<br><br>
+                【使用者問題】請問幾天內可以退貨？
+            </div>
+            <div class="wiki-ref">對應 Wiki 條目：Page 4 — 增強生成階段（Generation）</div>
+        </div>
+
+        <!-- Slide 7: 評估與總結 -->
+        <div class="slide">
+            <span class="badge">品質驗證 · 總結</span>
+            <h2>如何評估 RAG 系統做得好不好？</h2>
+            <p>業界常使用 <strong>RAG Triad（RAG 評估三角）</strong> 來檢驗系統的每一個環節：</p>
+            <div class="grid-3">
+                <div class="box">
+                    <h3 style="color:var(--accent);">1. 檢索相關性</h3>
+                    <p style="font-size:0.95rem;">Context Relevance：系統撈出來的資料，是否真的跟問題有關？</p>
+                </div>
+                <div class="box">
+                    <h3 style="color:var(--warning);">2. 答案忠實度</h3>
+                    <p style="font-size:0.95rem;">Groundedness：AI 的回答是否 100% 源自參考資料，沒有偷加料？</p>
+                </div>
+                <div class="box">
+                    <h3 style="color:var(--success);">3. 回答相關性</h3>
+                    <p style="font-size:0.95rem;">Answer Relevance：最終生成的答案，是否完整解決了使用者的疑惑？</p>
+                </div>
+            </div>
+            <div class="wiki-ref">對應 Wiki 條目：Page 5 — RAG 系統評估三要素（RAG Triad）</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="prevBtn" onclick="changeSlide(-1)" disabled>← 上一頁</button>
+        <span class="page-num" id="pageIndicator">1 / 7</span>
+        <button id="nextBtn" onclick="changeSlide(1)">下一頁 →</button>
+    </div>
+
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const progress = document.getElementById('progress');
+        const pageIndicator = document.getElementById('pageIndicator');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+
+        function updateUI() {
+            slides.forEach((s, idx) => s.classList.toggle('active', idx === currentSlide));
+            const percent = ((currentSlide + 1) / slides.length) * 100;
+            progress.style.width = percent + '%';
+            pageIndicator.textContent = `${currentSlide + 1} / ${slides.length}`;
+            prevBtn.disabled = currentSlide === 0;
+            nextBtn.disabled = currentSlide === slides.length - 1;
+        }
+
+        function changeSlide(dir) {
+            currentSlide = Math.max(0, Math.min(slides.length - 1, currentSlide + dir));
+            updateUI();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') changeSlide(1);
+            if (e.key === 'ArrowLeft') changeSlide(-1);
+        });
+
+        updateUI();
+    </script>
+</body>
+</html>
